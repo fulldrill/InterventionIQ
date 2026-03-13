@@ -69,13 +69,14 @@ export default function AIChatPanel({ assessmentId }: Props) {
         ];
       });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unable to get a response right now. Please try again.";
       setMessages((prev) => {
         const updated = prev.filter((m) => !m.isLoading);
         return [
           ...updated,
           {
             role: "assistant",
-            content: "Unable to get a response right now. Please try again.",
+            content: msg,
           },
         ];
       });

@@ -2,6 +2,7 @@
 
 import AIChatPanel from '@/components/ai/AIChatPanel';
 import ProficiencyBarChart from '@/components/charts/ProficiencyBarChart';
+import { assessmentApi } from '@/lib/api';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -61,9 +62,13 @@ export default function DashboardPage() {
   const [standardData, setStandardData] = useState<StandardData[]>([]);
   const [itemAnalysisData, setItemAnalysisData] = useState<ItemAnalysisData[]>([]);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
+  const [isUploadingCsv, setIsUploadingCsv] = useState(false);
   const [isLoadingStandards, setIsLoadingStandards] = useState(false);
   const [notice, setNotice] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [mathCsvFile, setMathCsvFile] = useState<File | null>(null);
+  const [metadataCsvFile, setMetadataCsvFile] = useState<File | null>(null);
+  const [customAssessmentName, setCustomAssessmentName] = useState('');
 
   const tokenHeaders = (): Record<string, string> => {
     const token = window.localStorage.getItem('access_token');
@@ -275,6 +280,41 @@ export default function DashboardPage() {
     }
   };
 
+  const handleUploadCsv = async () => {
+    if (!mathCsvFile || !metadataCsvFile) {
+      setErrorMessage('Select both the assessment CSV and metadata CSV first.');
+      return;
+    }
+
+    setIsUploadingCsv(true);
+    setNotice('');
+    setErrorMessage('');
+    try {
+      const payload = await assessmentApi.upload(
+        mathCsvFile,
+        metadataCsvFile,
+        selectedClassroomId || undefined,
+        customAssessmentName || undefined,
+      );
+
+      await loadClassroomsAndAssessments();
+      const createdId = String(payload?.assessment_id || '');
+      if (createdId) {
+        setSelectedAssessmentId(createdId);
+        setActiveTab('standards');
+      }
+
+      setNotice('CSV upload completed. Standards and item analysis are now available.');
+      setMathCsvFile(null);
+      setMetadataCsvFile(null);
+      setCustomAssessmentName('');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'CSV upload failed.');
+    } finally {
+      setIsUploadingCsv(false);
+    }
+  };
+
   if (isCheckingAuth) {
     return (
       <main className="min-h-screen bg-gradient-to-br from-cyan-100 via-white to-amber-100 px-4 py-8 text-slate-900 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:text-slate-100 sm:px-6 lg:px-8">
@@ -349,23 +389,68 @@ export default function DashboardPage() {
             <p className="mt-2 text-sm text-slate-700 dark:text-slate-300">
               Load the included sample files and generate proficiency analytics categorized by Maryland-aligned standards.
             </p>
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-4">
               <label className="block text-sm font-semibold">Target Classroom</label>
               <select
                 value={selectedClassroomId}
                 onChange={(event) => setSelectedClassroomId(event.target.value)}
                 className="w-full rounded-xl border border-slate-400 bg-white px-4 py-3 text-sm outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-600 dark:border-slate-500 dark:bg-slate-950 dark:focus:border-cyan-400 dark:focus:ring-cyan-400"
               >
+                <option value="">Auto-create / first available classroom</option>
                 {classrooms.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>
                 ))}
               </select>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-semibold">Assessment CSV (Reveal Math)</label>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(event) => setMathCsvFile(event.target.files?.[0] || null)}
+                    className="mt-2 w-full rounded-xl border border-slate-400 bg-white px-3 py-2 text-sm dark:border-slate-500 dark:bg-slate-950"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold">Metadata CSV</label>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(event) => setMetadataCsvFile(event.target.files?.[0] || null)}
+                    className="mt-2 w-full rounded-xl border border-slate-400 bg-white px-3 py-2 text-sm dark:border-slate-500 dark:bg-slate-950"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold">Assessment Name (optional)</label>
+                <input
+                  type="text"
+                  value={customAssessmentName}
+                  onChange={(event) => setCustomAssessmentName(event.target.value)}
+                  placeholder="Grade 3 Unit 4 Checkpoint"
+                  className="mt-2 w-full rounded-xl border border-slate-400 bg-white px-4 py-3 text-sm outline-none transition focus:border-cyan-600 focus:ring-2 focus:ring-cyan-600 dark:border-slate-500 dark:bg-slate-950 dark:focus:border-cyan-400 dark:focus:ring-cyan-400"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleUploadCsv}
+                disabled={isUploadingCsv || !mathCsvFile || !metadataCsvFile}
+                className="inline-flex items-center justify-center rounded-xl bg-slate-800 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white"
+              >
+                {isUploadingCsv ? 'Uploading CSV files...' : 'Upload CSV Files'}
+              </button>
+
+              <div className="h-px bg-slate-200 dark:bg-slate-700" />
+
               <button
                 type="button"
                 onClick={handleLoadSampleData}
-                disabled={isLoadingSample || classrooms.length === 0}
+                disabled={isLoadingSample}
                 className="inline-flex items-center justify-center rounded-xl bg-cyan-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-cyan-500 dark:text-slate-950 dark:hover:bg-cyan-400"
               >
                 {isLoadingSample ? 'Loading sample data...' : 'Load Sample Data'}

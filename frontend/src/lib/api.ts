@@ -119,11 +119,16 @@ export const analyticsApi = {
 export const assessmentApi = {
   list: () => apiFetch<Assessment[]>("/assessments"),
 
-  upload: async (mathFile: File, metadataFile: File, classroomId: string) => {
+  upload: async (mathFile: File, metadataFile: File, classroomId?: string, assessmentName?: string) => {
     const formData = new FormData();
     formData.append("math_csv", mathFile);
     formData.append("metadata_csv", metadataFile);
-    formData.append("classroom_id", classroomId);
+    if (classroomId) {
+      formData.append("classroom_id", classroomId);
+    }
+    if (assessmentName && assessmentName.trim()) {
+      formData.append("assessment_name", assessmentName.trim());
+    }
 
     const headers: Record<string, string> = {};
     const token = getAccessToken();

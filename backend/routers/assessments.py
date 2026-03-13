@@ -245,7 +245,7 @@ async def list_my_classrooms(
 async def upload_math_assessment(
     math_csv: UploadFile = File(...),
     metadata_csv: UploadFile = File(...),
-    classroom_id: UUID = Form(...),
+    classroom_id: UUID | None = Form(None),
     assessment_name: str | None = Form(None),
     week_of: date | None = Form(None),
     current_user: User = Depends(get_current_active_teacher),
