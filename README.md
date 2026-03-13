@@ -205,11 +205,16 @@ Copy `.env.example` to `.env` and configure:
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
 | `SMTP_*` | Yes | Email provider credentials |
 | `APP_ENV` | Yes | `development` or `production` |
+| `NGINX_FORCE_HTTPS` | No | `false` (auto/fallback) or `true` (require certs and HTTPS) |
 
 Generate a strong SECRET_KEY:
 ```bash
 python3 -c "import secrets; print(secrets.token_hex(64))"
 ```
+
+Nginx TLS mode behavior:
+- `NGINX_FORCE_HTTPS=false` (default): uses HTTPS config when `nginx/ssl/cert.pem` and `nginx/ssl/key.pem` exist, otherwise starts HTTP-only on port 80.
+- `NGINX_FORCE_HTTPS=true`: requires those cert files and starts HTTPS config; if missing, nginx exits fast so misconfiguration is obvious.
 
 ---
 

@@ -109,7 +109,7 @@ async def log_audit_event(
         resource=resource,
         resource_id=str(resource_id) if resource_id else None,
         ip_address=ip_address,
-        metadata=metadata or {},
+        metadata_json=metadata or {},
     )
     db.add(log_entry)
     # Note: session is committed by the get_db dependency after the request completes

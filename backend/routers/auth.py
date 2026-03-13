@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from pydantic import BaseModel, EmailStr, field_validator
 import re
+import logging
 
 from core.database import get_db
 from core.config import settings
@@ -22,8 +23,10 @@ from core.dependencies import get_current_user, log_audit_event
 from models.user import User
 from models.school import School
 from models.refresh_token import RefreshToken
+from services.email_service import send_verification_email
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 PASSWORD_PATTERN = re.compile(
     r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&^#])[A-Za-z\d@$!%*?&^#]{12,}$"
@@ -101,10 +104,36 @@ async def signup(request: SignupRequest, db: AsyncSession = Depends(get_db)):
         settings.email_verify_expire_hours
     )
 
-    # TODO: Send verification email
-    # await send_verification_email(request.email, token)
+    try:
+        await send_verification_email(request.email, token)
+    except Exception as exc:
+        # Avoid leaking SMTP details to clients; log for operators.
+        logger.error("Failed to send verification email: %s", exc)
 
     return {"message": "Account created. Please check your email to verify your address."}
+
+
+@router.get("/verify-email")
+async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
+    """Verify a user email via signed token delivered by email."""
+    payload = verify_signed_token(token)
+    if not payload or payload.get("purpose") != "email_verify":
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid verification token")
+
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.is_verified:
+        return {"message": "Email already verified."}
+
+    await db.execute(update(User).where(User.id == user.id).values(is_verified=True))
+    return {"message": "Email verified successfully. You can now log in."}
 
 
 @router.post("/login")
@@ -191,7 +220,7 @@ async def login(
         secure=settings.app_env == "production",
         samesite="strict",
         max_age=settings.refresh_token_expire_days * 86400,
-        path="/auth/refresh",
+        path="/api/auth/refresh",
     )
 
     ip = req.client.host if req else None
@@ -253,7 +282,7 @@ async def refresh_token(
         secure=settings.app_env == "production",
         samesite="strict",
         max_age=settings.refresh_token_expire_days * 86400,
-        path="/auth/refresh",
+        path="/api/auth/refresh",
     )
 
     return {"access_token": new_access, "token_type": "bearer"}
@@ -273,7 +302,7 @@ async def logout(
             .where(RefreshToken.token_hash == token_hash)
             .values(revoked=True)
         )
-    response.delete_cookie("refresh_token", path="/auth/refresh")
+    response.delete_cookie("refresh_token", path="/api/auth/refresh")
     return {"message": "Logged out"}
 
 

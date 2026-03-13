@@ -93,7 +93,7 @@ def calculate_proficiency(
     # Identify score columns
     score_cols = {}
     for col in scores_df.columns:
-        if col.startswith("Q") and "(") in col:
+        if col.startswith("Q") and "(" in col:
             try:
                 q_num = int(col.split("Q")[1].split(" ")[0])
                 score_cols[q_num] = col

@@ -3,9 +3,23 @@
  * All requests are scoped to the authenticated user's tenant automatically.
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 let accessToken: string | null = null;
+
+function getAccessToken(): string | null {
+  if (accessToken) {
+    return accessToken;
+  }
+  if (typeof window !== "undefined") {
+    const storedToken = window.localStorage.getItem("access_token");
+    if (storedToken) {
+      accessToken = storedToken;
+      return storedToken;
+    }
+  }
+  return null;
+}
 
 export function setAccessToken(token: string) {
   accessToken = token;
@@ -45,8 +59,9 @@ export async function apiFetch<T = unknown>(
     ...(fetchOptions.headers as Record<string, string>),
   };
 
-  if (!skipAuth && accessToken) {
-    headers["Authorization"] = `Bearer ${accessToken}`;
+  const token = getAccessToken();
+  if (!skipAuth && token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   let response = await fetch(`${API_BASE}${path}`, {
@@ -111,7 +126,8 @@ export const assessmentApi = {
     formData.append("classroom_id", classroomId);
 
     const headers: Record<string, string> = {};
-    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+    const token = getAccessToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const res = await fetch(`${API_BASE}/assessments/upload/math`, {
       method: "POST",

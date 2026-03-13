@@ -2,6 +2,8 @@
 Analytics router: all proficiency and visualization endpoints.
 All data is tenant-scoped to the authenticated user's school.
 """
+import re
+from collections import defaultdict
 from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query
@@ -24,15 +26,35 @@ import pandas as pd
 router = APIRouter()
 
 
+async def _can_access_assessment(
+    assessment: Assessment,
+    current_user: User,
+    db: AsyncSession,
+) -> bool:
+    if assessment.school_id != current_user.school_id:
+        return False
+    if current_user.role in ("school_admin", "super_admin"):
+        return True
+    if not assessment.classroom_id:
+        return False
+
+    classroom = await db.get(Classroom, assessment.classroom_id)
+    if not classroom:
+        return False
+    return classroom.teacher_id == current_user.id
+
+
 async def get_assessment_dataframes(
     assessment_id: UUID,
-    school_id: UUID,
+    current_user: User,
     db: AsyncSession,
 ):
     """Fetch assessment data and return as DataFrames. Enforces tenant scoping."""
-    # Verify assessment belongs to this school
+    # Verify assessment belongs to this school and teacher can access it
     assessment = await db.get(Assessment, assessment_id)
-    if not assessment or assessment.school_id != school_id:
+    if not assessment:
+        return None, None
+    if not await _can_access_assessment(assessment, current_user, db):
         return None, None
 
     # Fetch scores and questions
@@ -81,7 +103,7 @@ async def proficiency_by_standard(
 ):
     """Bar chart data: proficiency rate per CCSS standard, sorted ascending."""
     scores_df, metadata_df = await get_assessment_dataframes(
-        assessment_id, current_user.school_id, db
+        assessment_id, current_user, db
     )
     if scores_df is None:
         return {"data": [], "suppressed": False}
@@ -111,7 +133,7 @@ async def student_heatmap(
     Note: student XIDs returned here are already pseudonyms from the DB.
     """
     scores_df, metadata_df = await get_assessment_dataframes(
-        assessment_id, current_user.school_id, db
+        assessment_id, current_user, db
     )
     if scores_df is None:
         return {"data": [], "chart_type": "heatmap"}
@@ -140,7 +162,7 @@ async def story_problem_analysis(
 ):
     """Stacked bar: story problems vs computation performance by DOK level."""
     scores_df, metadata_df = await get_assessment_dataframes(
-        assessment_id, current_user.school_id, db
+        assessment_id, current_user, db
     )
     if scores_df is None:
         return {"data": {}, "chart_type": "stacked_bar"}
@@ -160,6 +182,8 @@ async def progress_over_time(
     classroom = await db.get(Classroom, classroom_id)
     if not classroom or classroom.school_id != current_user.school_id:
         return {"data": [], "chart_type": "line"}
+    if current_user.role == "teacher" and classroom.teacher_id != current_user.id:
+        return {"data": [], "chart_type": "line"}
 
     assessments_result = await db.execute(
         select(Assessment)
@@ -174,7 +198,7 @@ async def progress_over_time(
     time_series = []
     for assessment in assessments:
         scores_df, metadata_df = await get_assessment_dataframes(
-            assessment.id, current_user.school_id, db
+            assessment.id, current_user, db
         )
         if scores_df is None:
             continue
@@ -197,7 +221,7 @@ async def intervention_groups(
 ):
     """Grouped bar: students by intervention tier."""
     scores_df, metadata_df = await get_assessment_dataframes(
-        assessment_id, current_user.school_id, db
+        assessment_id, current_user, db
     )
     if scores_df is None:
         return {"data": {}, "chart_type": "grouped_bar"}
@@ -207,3 +231,68 @@ async def intervention_groups(
     groups = build_intervention_groups(students_list)
 
     return {"data": groups, "chart_type": "grouped_bar"}
+
+
+@router.get("/item_analysis")
+async def item_analysis(
+    assessment_id: UUID,
+    current_user: User = Depends(get_current_active_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bar chart data: average performance by question type."""
+    scores_df, metadata_df = await get_assessment_dataframes(
+        assessment_id, current_user, db
+    )
+    if scores_df is None:
+        return {"data": [], "chart_type": "bar"}
+
+    q_meta = {}
+    for _, row in metadata_df.iterrows():
+        q_num = int(row["question_number"])
+        q_meta[q_num] = {
+            "question_type": str(row.get("question_type", "Unknown") or "Unknown").strip(),
+            "max_points": float(row.get("max_points", 1.0) or 1.0),
+        }
+
+    type_scores: dict[str, list[float]] = defaultdict(list)
+    type_items: dict[str, set[int]] = defaultdict(set)
+
+    for _, row in scores_df.iterrows():
+        for col in scores_df.columns:
+            match = re.match(r"Q(\d+)\s*\(", str(col))
+            if not match:
+                continue
+            q_num = int(match.group(1))
+            meta = q_meta.get(q_num)
+            if not meta:
+                continue
+
+            val = row.get(col)
+            if val is None or str(val).strip() == "":
+                continue
+
+            try:
+                earned = float(val)
+            except (TypeError, ValueError):
+                continue
+
+            max_points = max(float(meta["max_points"]), 1.0)
+            pct = max(0.0, min(earned, max_points)) / max_points
+            q_type = meta["question_type"] or "Unknown"
+            type_scores[q_type].append(pct)
+            type_items[q_type].add(q_num)
+
+    data = []
+    for q_type, values in type_scores.items():
+        if not values:
+            continue
+        data.append(
+            {
+                "question_type": q_type,
+                "avg_score_pct": round(sum(values) / len(values) * 100, 1),
+                "item_count": len(type_items.get(q_type, set())),
+            }
+        )
+
+    data.sort(key=lambda row: row["avg_score_pct"])
+    return {"data": data, "chart_type": "bar"}

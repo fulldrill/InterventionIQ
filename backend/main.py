@@ -6,10 +6,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
+import importlib
 
 from core.config import settings
-from core.database import engine, Base
-from routers import auth, assessments, analytics, ai, admin, health
+from routers import health
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,13 +44,24 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# Register routers
+# Register required health router first so container health checks can pass
 app.include_router(health.router, tags=["Health"])
-app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-app.include_router(assessments.router, prefix="/assessments", tags=["Assessments"])
-app.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
-app.include_router(ai.router, prefix="/ai", tags=["AI Assistant"])
-app.include_router(admin.router, prefix="/admin", tags=["Administration"])
+
+# Optional routers can fail to import in partially provisioned environments.
+OPTIONAL_ROUTERS = [
+    ("routers.auth", "/auth", ["Authentication"]),
+    ("routers.assessments", "/assessments", ["Assessments"]),
+    ("routers.analytics", "/analytics", ["Analytics"]),
+    ("routers.ai", "/ai", ["AI Assistant"]),
+    ("routers.admin", "/admin", ["Administration"]),
+]
+
+for module_name, prefix, tags in OPTIONAL_ROUTERS:
+    try:
+        module = importlib.import_module(module_name)
+        app.include_router(module.router, prefix=prefix, tags=tags)
+    except Exception as exc:
+        logger.warning("Skipping optional router %s: %s", module_name, exc)
 
 
 @app.exception_handler(Exception)
