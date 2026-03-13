@@ -150,11 +150,60 @@ export const assessmentApi = {
 
 // ── AI API ────────────────────────────────────────────────────────────────────
 export const aiApi = {
-  chat: (question: string, assessmentId: string, conversationHistory: Message[]) =>
-    apiFetch<AIResponse>("/ai/chat", {
-      method: "POST",
-      body: JSON.stringify({ question, assessment_id: assessmentId, conversation_history: conversationHistory }),
-    }),
+  /**
+   * Send a message to the AI assistant.
+   *
+   * Uses a Next.js server-side proxy at /ask so the browser only ever calls a
+   * neutral URL. The actual FastAPI backend call happens server-to-server,
+   * completely invisible to browser extensions / ad blockers.
+   */
+  chat: async (question: string, assessmentId: string, conversationHistory: Message[]) => {
+    const payload = JSON.stringify({
+      question,
+      assessment_id: assessmentId,
+      conversation_history: conversationHistory,
+    });
+
+    const token = typeof window !== "undefined"
+      ? (window.localStorage.getItem("access_token") ?? "")
+      : "";
+
+    const doPost = async (bearerToken: string) =>
+      fetch("/ask", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+        },
+        credentials: "include",
+        body: payload,
+      });
+
+    let res = await doPost(token);
+
+    // If the access token expired, refresh once and retry.
+    if (res.status === 401) {
+      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (refreshRes.ok) {
+        const { access_token } = (await refreshRes.json()) as { access_token: string };
+        setAccessToken(access_token);
+        res = await doPost(access_token);
+      } else {
+        if (typeof window !== "undefined") window.location.href = "/login";
+        throw new Error("Session expired");
+      }
+    }
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+      throw new Error((err as { detail?: string }).detail || `HTTP ${res.status}`);
+    }
+
+    return res.json() as Promise<AIResponse>;
+  },
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ from statistics import mean
 from typing import Any
 from uuid import UUID, uuid4
 
-import anthropic
+from openai import OpenAI, OpenAIError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,12 @@ from models.school import Classroom, School
 from models.user import User
 
 logger = logging.getLogger(__name__)
-client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+
+def _get_ai_client() -> OpenAI:
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+    return OpenAI(api_key=settings.openai_api_key)
 
 STANDARD_MISSING_MESSAGE = "Insufficient data for {standard_id}"
 STANDARD_CODE_PATTERN = re.compile(r"(?:CCSS\.Math\.Content\.)?(\d\.[A-Z]{1,4}\.[A-Z]\.\d+)", re.IGNORECASE)
@@ -288,7 +293,7 @@ async def chat_with_ai(
     assessment_context: dict[str, Any],
     conversation_history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Ask Claude with strict assessment-grounded, anonymized context."""
+    """Ask OpenAI with strict assessment-grounded, anonymized context."""
     available = {_normalize_standard(s["standard_id"]) for s in assessment_context.get("standard_level", [])}
     requested = _extract_requested_standards(question)
     missing = [std for std in requested if std not in available]
@@ -312,24 +317,31 @@ async def chat_with_ai(
     messages.append({"role": "user", "content": f"{context_block}\n\nTeacher question: {question}"})
 
     try:
-        completion = client.messages.create(
-            model=settings.claude_model,
+        client = _get_ai_client()
+        completion = client.chat.completions.create(
+            model=settings.openai_model,
             max_tokens=settings.ai_max_tokens,
-            system=SYSTEM_PROMPT,
-            messages=messages,
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                *messages,
+            ],
         )
-        response_text = completion.content[0].text.strip() if completion.content else ""
+        response_text = (completion.choices[0].message.content or "").strip() if completion.choices else ""
         if response_text.startswith("{") and "chart_spec" in response_text:
             try:
                 parsed = json.loads(response_text)
                 if isinstance(parsed, dict) and "chart_spec" in parsed:
                     return {"response": None, "chart_spec": parsed["chart_spec"]}
             except json.JSONDecodeError:
-                logger.warning("Claude returned malformed chart JSON")
+                logger.warning("OpenAI returned malformed chart JSON")
 
         return {"response": response_text, "chart_spec": None}
-    except anthropic.APIError as exc:
-        logger.error("Claude API error: %s", exc)
+    except RuntimeError as exc:
+        logger.error("AI configuration error: %s", exc)
+        return {"response": "OPENAI_API_KEY is missing in backend .env.", "chart_spec": None}
+    except OpenAIError as exc:
+        logger.error("OpenAI API error: %s", exc)
         return {"response": "AI provider error. Please try again shortly.", "chart_spec": None}
     except Exception as exc:
         logger.error("AI service failure: %s", exc)

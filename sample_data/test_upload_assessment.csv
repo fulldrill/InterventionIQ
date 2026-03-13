@@ -1,0 +1,11 @@
+Q1 (1 point),Q2 (1 point),Q3 (1 point),Q4 (1 point),Q5 (2 points),Student Assignment XID (DO NOT CHANGE)
+1,1,1,0,2,urn:test:student:001
+1,1,0,1,1,urn:test:student:002
+0,1,1,1,2,urn:test:student:003
+1,0,1,1,1,urn:test:student:004
+0,0,1,0,0,urn:test:student:005
+1,1,1,1,2,urn:test:student:006
+1,0,0,1,1,urn:test:student:007
+0,1,0,0,0,urn:test:student:008
+1,1,1,0,1,urn:test:student:009
+0,0,0,1,0,urn:test:student:010

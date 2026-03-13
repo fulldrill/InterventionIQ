@@ -250,15 +250,13 @@ export default function DashboardPage() {
     setNotice('');
     setErrorMessage('');
     try {
-      const formData = new FormData();
-      if (selectedClassroomId) {
-        formData.append('classroom_id', selectedClassroomId);
-      }
-      const response = await fetch('/api/assessments/load-sample', {
+      const query = selectedClassroomId
+        ? `?classroom_id=${encodeURIComponent(selectedClassroomId)}`
+        : '';
+      const response = await fetch(`/api/assessments/load-sample${query}`, {
         method: 'POST',
         credentials: 'include',
         headers: tokenHeaders(),
-        body: formData,
       });
 
       const payload = await response.json().catch(() => ({}));

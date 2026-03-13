@@ -279,7 +279,7 @@ async def upload_math_assessment(
 
 @router.post("/load-sample", status_code=status.HTTP_201_CREATED)
 async def load_sample_assessment(
-    classroom_id: UUID | None = Form(None),
+    classroom_id: UUID | None = None,
     current_user: User = Depends(get_current_active_teacher),
     db: AsyncSession = Depends(get_db),
 ):

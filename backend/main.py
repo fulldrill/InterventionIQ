@@ -53,6 +53,9 @@ OPTIONAL_ROUTERS = [
     ("routers.assessments", "/assessments", ["Assessments"]),
     ("routers.analytics", "/analytics", ["Analytics"]),
     ("routers.ai", "/ai", ["AI Assistant"]),
+    ("routers.ai", "/assistant", ["AI Assistant"]),
+    ("routers.ai", "/tutor", ["AI Assistant"]),
+    ("routers.ai", "/query", ["AI Assistant"]),
     ("routers.admin", "/admin", ["Administration"]),
 ]
 
